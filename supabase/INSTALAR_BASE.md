@@ -12,3 +12,5 @@ El enlace abre el SQL Editor del proyecto correcto con el esquema ya cargado.
 
 El script habilita **paula.pgianolini@gmail.com** como primera administradora. No contiene contraseñas ni claves secretas.
 
+Después de completar esta instalación inicial, ejecutá también `migrations/002_complexes_cocheras.sql` para habilitar complejos, unidades, cocheras y sus asignaciones sin superposición.
+

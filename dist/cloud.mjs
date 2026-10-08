@@ -1,4 +1,4 @@
-import {seedData,todayISO} from './model.mjs';
+import {seedData,todayISO,planRentCharges} from './model.mjs';
 
 export const SUPABASE_URL='https://iqaoveeivpafijdxzhmr.supabase.co';
 export const SUPABASE_KEY='sb_publishable_B467-pjCAmPCjJiftvvWQw_EPP5kbgE';
@@ -96,9 +96,10 @@ export const rpc=(name,body)=>api(`rpc/${name}`,{method:'POST',body});
 const byNewest=(a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''));
 
 export async function loadPortal(){
-  const [profiles,properties,tenants,contracts,charges,receipts,adjustments]=await Promise.all([
-    select('profiles','select=*'),select('properties','select=*'),select('tenants','select=*'),
-    select('contracts','select=*'),select('charges','select=*'),select('receipts','select=*'),select('adjustments','select=*')
+  const [profiles,complexes,properties,tenants,contracts,charges,receipts,adjustments,parkingSpaces,parkingAssignments]=await Promise.all([
+    select('profiles','select=*'),select('complexes','select=*'),select('properties','select=*'),select('tenants','select=*'),
+    select('contracts','select=*'),select('charges','select=*'),select('receipts','select=*'),select('adjustments','select=*'),
+    select('parking_spaces','select=*'),select('parking_assignments','select=*')
   ]);
   const user=currentUser();
   const profile=profiles.find(item=>item.user_id===user?.id);
@@ -118,11 +119,22 @@ export async function loadPortal(){
   if(profile.role==='admin'){
     [audit,invites]=await Promise.all([select('audit_log','select=*&order=occurred_at.desc&limit=250'),select('access_invites','select=*&order=created_at.desc')]);
   }
-  return {version:2,profile,profiles,invites,audit,properties:properties.map(row=>({id:row.id,address:row.address,city:row.city,type:row.property_type,bedrooms:row.bedrooms,parking:row.parking,createdBy:row.created_by,updatedBy:row.updated_by})),tenants:tenants.map(row=>({id:row.id,name:row.full_name,email:row.email,phone:row.phone,createdBy:row.created_by,updatedBy:row.updated_by})),contracts:contracts.map(row=>({id:row.id,propertyId:row.property_id,tenantId:row.tenant_id,start:row.start_date,end:row.end_date,rent:Number(row.monthly_rent),frequency:row.adjustment_frequency_months,lastAdjustmentDate:row.last_adjustment_date||'',dueDay:row.due_day,deposit:Number(row.deposit_amount),guarantee:row.guarantee_type,guaranteeDetail:row.guarantee_detail,createdBy:row.created_by,updatedBy:row.updated_by})),payments,adjustments:adjustments.map(row=>({id:row.id,contractId:row.contract_id,date:row.effective_date,rate:Number(row.rate),before:Number(row.previous_rent),after:Number(row.new_rent),createdBy:row.created_by,createdAt:row.created_at}))};
+  return {version:3,profile,profiles,invites,audit,
+    complexes:complexes.map(row=>({id:row.id,name:row.name,address:row.address,city:row.city,createdBy:row.created_by,updatedBy:row.updated_by})),
+    properties:properties.map(row=>({id:row.id,complexId:row.complex_id||'',unitLabel:row.unit_label||'',address:row.address,city:row.city,type:row.property_type,bedrooms:row.bedrooms,createdBy:row.created_by,updatedBy:row.updated_by})),
+    tenants:tenants.map(row=>({id:row.id,name:row.full_name,email:row.email,phone:row.phone,createdBy:row.created_by,updatedBy:row.updated_by})),
+    contracts:contracts.map(row=>({id:row.id,propertyId:row.property_id,tenantId:row.tenant_id,start:row.start_date,end:row.end_date,rent:Number(row.monthly_rent),frequency:row.adjustment_frequency_months,lastAdjustmentDate:row.last_adjustment_date||'',dueDay:row.due_day,deposit:Number(row.deposit_amount),guarantee:row.guarantee_type,guaranteeDetail:row.guarantee_detail,createdBy:row.created_by,updatedBy:row.updated_by})),
+    payments,
+    adjustments:adjustments.map(row=>({id:row.id,contractId:row.contract_id,date:row.effective_date,rate:Number(row.rate),before:Number(row.previous_rent),after:Number(row.new_rent),createdBy:row.created_by,createdAt:row.created_at})),
+    parkingSpaces:parkingSpaces.map(row=>({id:row.id,complexId:row.complex_id,code:row.code,notes:row.notes||'',createdBy:row.created_by,updatedBy:row.updated_by})),
+    parkingAssignments:parkingAssignments.map(row=>({id:row.id,parkingSpaceId:row.parking_space_id,contractId:row.contract_id,start:row.start_date,end:row.end_date,notes:row.notes||'',createdBy:row.created_by,updatedBy:row.updated_by}))};
 }
 
 const entityMap={
-  property:{table:'properties',toRow:o=>({organization_id:ORG_ID,address:o.address,city:o.city,property_type:o.type,bedrooms:o.bedrooms,parking:o.parking})},
+  complex:{table:'complexes',toRow:o=>({organization_id:ORG_ID,name:o.name,address:o.address,city:o.city})},
+  property:{table:'properties',toRow:o=>({organization_id:ORG_ID,complex_id:o.complexId||null,unit_label:o.unitLabel||'',address:o.address,city:o.city,property_type:o.type,bedrooms:o.bedrooms,parking:false})},
+  parking:{table:'parking_spaces',toRow:o=>({organization_id:ORG_ID,complex_id:o.complexId,code:o.code,notes:o.notes||''})},
+  parkingAssignment:{table:'parking_assignments',toRow:o=>({organization_id:ORG_ID,parking_space_id:o.parkingSpaceId,contract_id:o.contractId,start_date:o.start,end_date:o.end,notes:o.notes||''})},
   tenant:{table:'tenants',toRow:o=>({organization_id:ORG_ID,full_name:o.name,email:o.email,phone:o.phone})},
   contract:{table:'contracts',toRow:o=>({organization_id:ORG_ID,property_id:o.propertyId,tenant_id:o.tenantId,start_date:o.start,end_date:o.end,monthly_rent:o.rent,adjustment_frequency_months:o.frequency,last_adjustment_date:o.lastAdjustmentDate||null,due_day:o.dueDay,deposit_amount:o.deposit,guarantee_type:o.guarantee,guarantee_detail:o.guaranteeDetail})},
   payment:{table:'charges',toRow:o=>({organization_id:ORG_ID,contract_id:o.contractId,concept:o.kind,period:o.period,due_date:o.dueDate,amount:o.amount,notes:o.notes||''})}
@@ -154,27 +166,30 @@ export async function logCsvExport(filters){return rpc('log_export',{report_name
 
 export async function setAccessInvite(email,role,active=true){return rpc('set_access_invite',{target_email:email,access_role:role,is_active:active});}
 
-export async function ensureRentCharges(contracts,payments,period){
-  const [year,month]=period.split('-').map(Number);
-  const lastDay=new Date(Date.UTC(year,month,0)).getUTCDate();
-  const start=`${period}-01`,end=`${period}-${String(lastDay).padStart(2,'0')}`;
-  const missing=contracts.filter(c=>c.start<=end&&c.end>=start&&!payments.some(p=>p.contractId===c.id&&p.kind==='Alquiler'&&p.period===period));
-  for(const contract of missing){
-    const day=Math.min(Math.max(1,Number(contract.dueDay)||10),lastDay);
-    try{await insert('charges',{organization_id:ORG_ID,contract_id:contract.id,concept:'Alquiler',period,due_date:`${period}-${String(day).padStart(2,'0')}`,amount:Number(contract.rent)||0,notes:''});}
-    catch(error){if(error.status!==409)throw error;}
+export async function ensureRentCharges(contracts,payments,currentPeriod,adjustments=[]){
+  let created=0;
+  for(const item of planRentCharges(contracts,payments,currentPeriod,adjustments)){
+    try{
+      await insert('charges',{organization_id:ORG_ID,contract_id:item.contractId,concept:'Alquiler',period:item.period,due_date:item.dueDate,amount:item.amount,notes:'Generado automáticamente'});
+      created++;
+    }catch(error){if(error.status!==409)throw error;}
   }
-  return missing.length;
+  return created;
 }
 
 export async function seedFictitiousData(){
   const seed=seedData(todayISO());
+  const complexIds=new Map(seed.complexes.map(item=>[item.id,crypto.randomUUID()]));
   const propertyIds=new Map(seed.properties.map(item=>[item.id,crypto.randomUUID()]));
   const tenantIds=new Map(seed.tenants.map(item=>[item.id,crypto.randomUUID()]));
   const contractIds=new Map(seed.contracts.map(item=>[item.id,crypto.randomUUID()]));
-  await insert('properties',seed.properties.map(item=>({id:propertyIds.get(item.id),organization_id:ORG_ID,address:item.address,city:item.city,property_type:item.type,bedrooms:item.bedrooms,parking:item.parking})));
+  const parkingIds=new Map(seed.parkingSpaces.map(item=>[item.id,crypto.randomUUID()]));
+  await insert('complexes',seed.complexes.map(item=>({id:complexIds.get(item.id),organization_id:ORG_ID,name:item.name,address:item.address,city:item.city})));
+  await insert('properties',seed.properties.map(item=>({id:propertyIds.get(item.id),organization_id:ORG_ID,complex_id:complexIds.get(item.complexId)||null,unit_label:item.unitLabel||'',address:item.address,city:item.city,property_type:item.type,bedrooms:item.bedrooms,parking:false})));
   await insert('tenants',seed.tenants.map(item=>({id:tenantIds.get(item.id),organization_id:ORG_ID,full_name:item.name,email:item.email,phone:item.phone})));
   await insert('contracts',seed.contracts.map(item=>({id:contractIds.get(item.id),organization_id:ORG_ID,property_id:propertyIds.get(item.propertyId),tenant_id:tenantIds.get(item.tenantId),start_date:item.start,end_date:item.end,monthly_rent:item.rent,adjustment_frequency_months:item.frequency,last_adjustment_date:item.lastAdjustmentDate||null,due_day:item.dueDay,deposit_amount:item.deposit,guarantee_type:item.guarantee,guarantee_detail:item.guaranteeDetail})));
+  await insert('parking_spaces',seed.parkingSpaces.map(item=>({id:parkingIds.get(item.id),organization_id:ORG_ID,complex_id:complexIds.get(item.complexId),code:item.code,notes:item.notes||''})));
+  await insert('parking_assignments',seed.parkingAssignments.map(item=>({id:crypto.randomUUID(),organization_id:ORG_ID,parking_space_id:parkingIds.get(item.parkingSpaceId),contract_id:contractIds.get(item.contractId),start_date:item.start,end_date:item.end,notes:item.notes||''})));
   const chargeIds=new Map(seed.payments.map(item=>[item.id,crypto.randomUUID()]));
   await insert('charges',seed.payments.map(item=>({id:chargeIds.get(item.id),organization_id:ORG_ID,contract_id:contractIds.get(item.contractId),concept:item.kind,period:item.period,due_date:item.dueDate,amount:item.amount,notes:'Dato ficticio de demostración'})));
   const paid=seed.payments.filter(item=>Number(item.paidAmount)>0);

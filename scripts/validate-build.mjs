@@ -7,14 +7,16 @@ const requiredFiles = [
   'dist/app.js',
   'dist/cloud.mjs',
   'dist/csv.mjs',
-  'dist/model.mjs'
+  'dist/model.mjs',
+  'supabase/migrations/002_complexes_cocheras.sql'
 ];
 
 await Promise.all(requiredFiles.map((file) => access(file)));
 
-const [html, cloud] = await Promise.all([
+const [html, cloud, parkingMigration] = await Promise.all([
   readFile('dist/index.html', 'utf8'),
-  readFile('dist/cloud.mjs', 'utf8')
+  readFile('dist/cloud.mjs', 'utf8'),
+  readFile('supabase/migrations/002_complexes_cocheras.sql', 'utf8')
 ]);
 
 if (!html.includes('<title>Ámbito · Administración de alquileres</title>')) {
@@ -31,6 +33,12 @@ if (!cloud.includes('sb_publishable_')) {
 
 if (/service[_-]?role|sb_secret_/i.test(cloud)) {
   throw new Error('Se detectó una clave privada en el código del navegador.');
+}
+
+for (const requirement of ['parking_assignments_no_overlap','enable row level security','validate_parking_assignment','commit;']) {
+  if (!parkingMigration.toLowerCase().includes(requirement)) {
+    throw new Error(`La migración de cocheras está incompleta: ${requirement}`);
+  }
 }
 
 console.log('Portal validado y listo para publicar en Vercel.');
