@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#13222b" />
+  <title>Ámbito · Administración de alquileres</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="monthly.css" />
+</head>
+<body>
+  <div id="authGate" class="auth-gate">
+    <section class="auth-card" aria-labelledby="authTitle">
+      <div class="auth-brand"><span class="brand-mark">A<span>.</span></span><div><strong>Ámbito</strong><small>GESTIÓN INMOBILIARIA</small></div></div>
+      <span class="overline">ACCESO PRIVADO</span>
+      <h1 id="authTitle">Ingresá a tu espacio de trabajo.</h1>
+      <p class="muted">La información se guarda de forma centralizada y cada cambio queda asociado a la persona que lo realizó.</p>
+      <div class="auth-tabs" role="tablist"><button type="button" class="auth-tab active" data-auth-mode="login">Ingresar</button><button type="button" class="auth-tab" data-auth-mode="signup">Crear acceso</button></div>
+      <form id="authForm" class="auth-form">
+        <label id="fullNameField" hidden>Nombre y apellido<input name="fullName" autocomplete="name" /></label>
+        <label>Correo electrónico<input name="email" type="email" autocomplete="email" required /></label>
+        <label>Contraseña<input name="password" type="password" autocomplete="current-password" minlength="8" required /></label>
+        <button id="authSubmit" class="primary-btn full" type="submit">Ingresar</button>
+      </form>
+      <p id="authMessage" class="auth-message" role="status"></p>
+      <p class="auth-note">Solo pueden entrar correos previamente habilitados por un administrador.</p>
+    </section>
+  </div>
+  <div id="loadingGate" class="loading-gate" hidden><span class="loader"></span><strong>Sincronizando la cartera…</strong></div>
+  <div id="appShell" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#inicio" aria-label="Ámbito, inicio"><span class="brand-mark">A<span>.</span></span><span><strong>Ámbito</strong><small>GESTIÓN INMOBILIARIA</small></span></a>
+      <div class="side-caption">ESPACIO DE TRABAJO</div>
+      <nav class="nav" aria-label="Secciones">
+        <button class="nav-item active" data-view="inicio"><span class="nav-icon">◫</span> Resumen <span class="nav-tail">↗</span></button>
+        <button class="nav-item" data-view="cartera"><span class="nav-icon">▦</span> Cartera</button>
+        <button class="nav-item" data-view="movimientos"><span class="nav-icon">▤</span> Cobros y ajustes</button>
+        <button class="nav-item admin-only" data-view="equipo" hidden><span class="nav-icon">◎</span> Equipo</button>
+        <button class="nav-item admin-only" data-view="actividad" hidden><span class="nav-icon">≋</span> Actividad</button>
+      </nav>
+      <div class="side-bottom">
+        <div class="demo-box"><span class="demo-dot"></span><div><strong>Entorno de ejemplo</strong><p>Todos los registros iniciales son ficticios.</p></div></div>
+        <div class="side-actions"><button id="exportBtn" class="side-link">↓ Exportar respaldo JSON</button><button id="signOutBtn" class="side-link subdued">Cerrar sesión</button></div>
+        <p class="storage-note">Datos centralizados y protegidos. La actividad queda registrada por usuario.</p>
+      </div>
+    </aside>
+    <div class="main-area">
+      <header class="topbar"><button id="menuBtn" class="menu-btn" aria-label="Abrir menú">☰</button><div class="breadcrumbs">ESPACIO DE TRABAJO <span>/</span> <strong id="breadcrumb">Resumen</strong></div><div class="top-right"><span id="clockDate"></span><div class="user-chip"><span><b id="userName"></b><small id="userRole"></small></span><span id="userAvatar" class="avatar">—</span></div></div></header>
+      <main>
+        <section id="inicio" class="view active" aria-labelledby="homeTitle">
+          <div class="page-heading"><div><div class="eyebrow">PANEL DE COBRANZA <span class="eyebrow-line"></span> ARGENTINA</div><h1 id="homeTitle">Alquileres y expensas<span class="period">.</span></h1><p class="subheading">Controlá lo cobrado y lo pendiente de cada mes.</p></div><div class="heading-actions"><button class="outline-btn" data-action="new-expense">＋ Cargar expensa</button><button class="primary-btn" data-action="new-payment">＋ Registrar concepto</button></div></div>
+          <div class="sample-banner"><span>✦</span><strong>Prototipo con datos ficticios</strong><span>Las propiedades, personas e importes de ejemplo no representan tu cartera.</span><button id="seedButton" class="text-link admin-only" hidden>Cargar ejemplo ficticio</button></div>
+          <div class="metrics" id="metrics"></div>
+          <div class="panel monthly-panel"><div class="panel-head monthly-head"><div><span class="overline">CONTROL MENSUAL</span><h2>Vencimientos y pagos</h2></div><div class="month-controls"><label for="homeMonth">Período</label><input id="homeMonth" type="month" /><select id="homeStatus" aria-label="Filtrar estado"><option value="todos">Todos los estados</option><option value="pendiente">Pendientes</option><option value="vencido">Vencidos</option><option value="parcial">Pago parcial</option><option value="pagado">Pagados</option></select></div></div><div id="homeCollections" class="table-wrap"></div></div>
+          <div class="dashboard-grid lower-grid"><div class="panel collection-panel"><div class="panel-head"><div><span class="overline">ESTADO DE COBRANZA</span><h2 id="collectionTitle">Total del mes</h2></div><span class="soft-tag" id="collectionPeriod"></span></div><div class="collection-main"><div class="collection-number" id="collectionAmount"></div><span class="muted">de <strong id="collectionTarget"></strong> previstos</span></div><div class="progress-track"><div id="collectionFill"></div></div><div class="collection-footer"><span id="collectionCount"></span><button class="text-link" data-goto="movimientos">Ver todos los movimientos →</button></div></div><div class="panel alerts-panel"><div class="panel-head"><div><span class="overline">SEGUIMIENTO</span><h2>Alertas importantes</h2></div><span class="small-round">!</span></div><div id="alerts"></div></div></div>
+          <div class="panel adjustments-panel"><div class="panel-head"><div><span class="overline">PRÓXIMOS 90 DÍAS</span><h2>Calendario de ajustes</h2></div><button class="text-link" data-goto="movimientos" data-tab="ajustes">Abrir calculadora →</button></div><div id="upcoming"></div></div>
+        </section>
+        <section id="cartera" class="view" aria-labelledby="portfolioTitle"><div class="page-heading"><div><div class="eyebrow">ADMINISTRACIÓN <span class="eyebrow-line"></span> CARTERA</div><h1 id="portfolioTitle">Cada detalle en orden<span class="period">.</span></h1><p class="subheading">Consultá y actualizá los registros vinculados de tu cartera.</p></div><button id="portfolioAdd" class="primary-btn">＋ Nueva propiedad</button></div><div class="panel workspace-panel"><div class="tabs" id="portfolioTabs"><button class="tab active" data-portfolio="propiedades">Propiedades</button><button class="tab" data-portfolio="inquilinos">Inquilinos</button><button class="tab" data-portfolio="contratos">Contratos</button><button class="tab" data-portfolio="garantias">Depósitos y garantías</button></div><div class="toolbar"><div class="search-wrap"><span>⌕</span><input id="portfolioSearch" placeholder="Buscar en la cartera…" aria-label="Buscar en la cartera" /></div><select id="portfolioFilter" aria-label="Filtrar estado"></select></div><div id="portfolioContent" class="table-wrap"></div></div></section>
+        <section id="movimientos" class="view" aria-labelledby="moneyTitle"><div class="page-heading"><div><div class="eyebrow">CONTROL FINANCIERO <span class="eyebrow-line"></span> MOVIMIENTOS</div><h1 id="moneyTitle">Cobros y ajustes<span class="period">.</span></h1><p class="subheading">Registrá pagos y anticipá las próximas actualizaciones del canon.</p></div><div class="heading-actions"><button id="exportPaymentsBtn" class="outline-btn">↓ Exportar CSV</button><button id="moneyAdd" class="primary-btn">＋ Registrar concepto</button></div></div><div class="panel workspace-panel"><div class="tabs" id="moneyTabs"><button class="tab active" data-money="pagos">Pagos de alquiler y expensas</button><button class="tab" data-money="ajustes">Calculadora de ajustes</button></div><div id="paymentsArea"><div class="toolbar"><div class="search-wrap"><span>⌕</span><input id="paymentSearch" placeholder="Buscar propiedad, período o inquilino…" aria-label="Buscar pagos" /></div><select id="paymentProperty" aria-label="Filtrar unidad"><option value="todos">Todas las unidades</option></select><select id="paymentPeriod" aria-label="Filtrar período"><option value="todos">Todos los períodos</option></select><select id="paymentFilter" aria-label="Filtrar pagos"><option value="todos">Todos los estados</option><option value="pendiente">Pendientes</option><option value="vencido">Vencidos</option><option value="parcial">Pago parcial</option><option value="pagado">Pagados</option></select><select id="paymentType" aria-label="Filtrar tipo"><option value="todos">Todos los conceptos</option><option value="Alquiler">Alquiler</option><option value="Expensas">Expensas</option></select></div><div id="unitDebtSummary" hidden></div><div id="paymentsContent" class="table-wrap"></div></div><div id="adjustmentsArea" hidden><div class="calculator-grid"><div class="calc-inputs"><span class="overline">SIMULACIÓN</span><h2>Próximo canon</h2><p class="muted">Definí el porcentaje según el mecanismo pactado en el contrato. La simulación no modifica los datos.</p><label>Contrato<select id="calcContract"></select></label><label>Porcentaje de ajuste<input id="calcRate" type="number" min="0" max="1000" step="0.01" placeholder="Ej.: 12,5" /></label><button id="applyAdjustment" class="primary-btn full">Aplicar ajuste al contrato</button><p class="form-note">Al aplicar, se guarda el nuevo canon y comienza el siguiente período desde la fecha indicada.</p></div><div class="calc-result" id="calcResult"></div></div><div class="adjustment-history"><div class="panel-head"><div><span class="overline">TRAZABILIDAD</span><h2>Historial de ajustes</h2></div></div><div id="adjustmentHistory"></div></div></div></div></section>
+        <section id="equipo" class="view" aria-labelledby="teamTitle"><div class="page-heading"><div><div class="eyebrow">ADMINISTRACIÓN <span class="eyebrow-line"></span> ACCESOS</div><h1 id="teamTitle">Equipo y permisos<span class="period">.</span></h1><p class="subheading">Habilitá correos y definí quién administra o carga información.</p></div></div><div class="team-grid"><form id="inviteForm" class="panel invite-card"><span class="overline">NUEVO ACCESO</span><h2>Habilitar una persona</h2><label>Correo electrónico<input name="email" type="email" required placeholder="persona@empresa.com" /></label><label>Rol<select name="role"><option value="operativo">Operativo</option><option value="admin">Administrador</option></select></label><button class="primary-btn" type="submit">Guardar acceso</button><p class="form-note">Luego esa persona debe elegir “Crear acceso” en la pantalla de ingreso usando este mismo correo.</p></form><div class="panel team-list"><div class="panel-head"><div><span class="overline">USUARIOS</span><h2>Accesos habilitados</h2></div></div><div id="teamContent" class="table-wrap"></div></div></div></section>
+        <section id="actividad" class="view" aria-labelledby="activityTitle"><div class="page-heading"><div><div class="eyebrow">TRAZABILIDAD <span class="eyebrow-line"></span> AUDITORÍA</div><h1 id="activityTitle">Actividad del equipo<span class="period">.</span></h1><p class="subheading">Revisá quién creó, modificó, eliminó o exportó información.</p></div><button id="refreshActivity" class="outline-btn">Actualizar</button></div><div class="panel workspace-panel"><div id="activityContent" class="table-wrap"></div></div></section>
+      </main>
+    </div>
+  </div>
+  <dialog id="formDialog"><form id="editorForm" method="dialog"><div class="dialog-head"><div><span class="overline" id="dialogKicker">NUEVO REGISTRO</span><h2 id="dialogTitle"></h2></div><button type="button" id="closeDialog" class="icon-button" aria-label="Cerrar">×</button></div><div id="formFields" class="form-fields"></div><div class="dialog-actions"><button type="button" id="deleteRecord" class="danger-link" hidden>Eliminar</button><span class="spacer"></span><button type="button" id="cancelDialog" class="outline-btn">Cancelar</button><button type="submit" class="primary-btn">Guardar</button></div></form></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+import {todayISO,addDays,addMonths,daysBetween,monthOf,money,dateLabel,nextAdjustment,adjustedRent,collectedAmount,paymentStatus,seedData,validBackup} from './model.mjs';
+import {buildCsv} from './csv.mjs';
+import {CloudError,restoreSession,signIn,signUp,signOut,loadPortal,saveEntity,deleteEntity,addReceipt,saveAdjustment,logCsvExport,setAccessInvite,ensureRentCharges,seedFictitiousData,currentUser} from './cloud.mjs';
+
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today=todayISO();
+let data={version:2,profile:null,profiles:[],invites:[],audit:[],properties:[],tenants:[],contracts:[],payments:[],adjustments:[]};
+let view='inicio',portfolioTab='propiedades',moneyTab='pagos',homeMonth=monthOf(today),editing=null,toastTimer,authMode='login',busy=false;
+const prop=id=>data.properties.find(x=>x.id===id);
+const tenant=id=>data.tenants.find(x=>x.id===id);
+const contract=id=>data.contracts.find(x=>x.id===id);
+const profile=id=>data.profiles.find(x=>x.user_id===id);
+const profileName=id=>profile(id)?.full_name||profile(id)?.email||'Usuario no disponible';
+const isAdmin=()=>data.profile?.role==='admin';
+const propName=c=>prop(c?.propertyId)?.address||'Propiedad eliminada';
+const tenantName=c=>tenant(c?.tenantId)?.name||'Inquilino eliminado';
+const activeContracts=()=>data.contracts.filter(c=>c.end>=today);
+const pendingAmount=p=>Math.max(0,(Number(p.amount)||0)-collectedAmount(p));
+const statusMeta=p=>{const s=paymentStatus(p,today),late=p.dueDate<today&&s!=='pagado';return s==='pagado'?['Pagado','green']:s==='parcial'?[late?'Parcial vencido':'Pago parcial',late?'red':'blue']:s==='vencido'?['Vencido','red']:['Pendiente','amber'];};
+const fmtPeriod=s=>{if(!s)return '—';return new Intl.DateTimeFormat('es-AR',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(s+'-01T00:00:00Z'));};
+const badge=(label,tone)=>`<span class="status ${tone}">${esc(label)}</span>`;
+const empty=(title,detail)=>`<div class="empty-state"><div class="empty-icon">◇</div><b>${esc(title)}</b>${esc(detail)}</div>`;
+const table=(heads,rows)=>`<table class="data-table"><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+function toast(message){const el=$('#toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),4100);}
+function showView(v){if((v==='equipo'||v==='actividad')&&!isAdmin())v='inicio';view=v;document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===v));document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===v));$('#breadcrumb').textContent={inicio:'Resumen',cartera:'Cartera',movimientos:'Cobros y ajustes',equipo:'Equipo',actividad:'Actividad'}[v];$('.sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});render();}
+function render(){renderHome();renderPortfolio();renderMoney();renderTeam();renderActivity();}
+function renderHome(){
+  $('#homeMonth').value=homeMonth;
+  const f=$('#homeStatus').value||'todos',items=data.payments.filter(p=>p.period===homeMonth),visible=items.filter(p=>f==='todos'||paymentStatus(p,today)===f).sort((a,b)=>{const order={vencido:0,parcial:1,pendiente:2,pagado:3};return order[paymentStatus(a,today)]-order[paymentStatus(b,today)]||a.dueDate.localeCompare(b.dueDate);});
+  const total=items.reduce((a,p)=>a+Number(p.amount||0),0),collected=items.reduce((a,p)=>a+collectedAmount(p),0),pending=items.reduce((a,p)=>a+pendingAmount(p),0),overdue=items.filter(p=>p.dueDate<today&&pendingAmount(p)>0).length;
+  const soonAdjust=activeContracts().filter(c=>{const d=nextAdjustment(c);return d&&daysBetween(today,d)<=30;}).length;
+  const cards=[['A cobrar',money(total),fmtPeriod(homeMonth),'▤'],['Cobrado',money(collected),`${total?Math.round(collected/total*100):0}% del total mensual`,'↗'],['Saldo pendiente',money(pending),`${items.filter(p=>pendingAmount(p)>0).length} conceptos abiertos`,'◷'],['Vencimientos atrasados',overdue,overdue?'Requieren seguimiento':'Sin atrasos en el período','!']];
+  $('#metrics').innerHTML=cards.map(([label,value,note,icon])=>`<div class="metric"><div class="metric-top"><span class="metric-label">${label}</span><span class="metric-icon">${icon}</span></div><div class="metric-value">${value}</div><div class="metric-foot">${esc(note)}</div></div>`).join('');
+  $('#homeCollections').innerHTML=visible.length?table(['Propiedad / inquilino','Concepto','Vencimiento','Monto','Cobrado / pendiente','Estado',''],visible.map(p=>{const c=contract(p.contractId),[label,tone]=statusMeta(p),paid=collectedAmount(p),balance=pendingAmount(p);return `<tr><td><div class="strong">${esc(propName(c))}</div><div class="tiny">${esc(tenantName(c))}</div></td><td>${badge(p.kind,p.kind==='Alquiler'?'green':'neutral')}</td><td>${dateLabel(p.dueDate)}</td><td class="strong">${money(p.amount)}</td><td><div class="money-stack"><span class="paid-value">Cobrado ${money(paid)}</span><span class="pending-value">Pendiente ${money(balance)}</span></div></td><td>${badge(label,tone)}</td><td>${balance>0?`<button class="row-button quick-pay" data-collect="${esc(p.id)}">Registrar pago</button>`:`<button class="row-button" data-edit="payment" data-id="${esc(p.id)}">Ver</button>`}</td></tr>`;}))+`<div class="summary-note">${visible.length} concepto${visible.length===1?'':'s'} visibles · Las expensas se cargan manualmente y los alquileres del mes se generan desde los contratos vigentes.</div>`:empty('No hay conceptos para ese filtro','Cargá una expensa o seleccioná otro estado.');
+  $('#collectionPeriod').textContent=fmtPeriod(homeMonth);$('#collectionAmount').textContent=money(collected);$('#collectionTarget').textContent=money(total);$('#collectionCount').textContent=`${items.filter(p=>paymentStatus(p,today)==='pagado').length} de ${items.length} conceptos completamente cobrados`;$('#collectionFill').style.width=`${total?Math.min(100,collected/total*100):0}%`;
+  const alerts=[];
+  for(const p of data.payments){const s=paymentStatus(p,today),delta=daysBetween(today,p.dueDate),open=pendingAmount(p)>0;if(open&&(delta<0||delta<=14))alerts.push({rank:delta<0?0:2,date:p.dueDate,title:`${p.kind} · ${propName(contract(p.contractId))}`,sub:`Pendiente ${money(pendingAmount(p))} · ${fmtPeriod(p.period)}`,when:delta<0?`Hace ${-delta} d`:delta===0?'Hoy':`En ${delta} d`,tone:delta<0?'danger':''});}
+  for(const c of activeContracts()){const d=nextAdjustment(c),delta=d?daysBetween(today,d):999;if(delta<=45)alerts.push({rank:delta<0?0:1,date:d,title:`Ajuste · ${propName(c)}`,sub:`Frecuencia: cada ${c.frequency} meses`,when:delta<0?`Hace ${-delta} d`:delta===0?'Hoy':`En ${delta} d`,tone:delta<0?'danger':''});const left=daysBetween(today,c.end);if(left<=60)alerts.push({rank:1,date:c.end,title:`Vence contrato · ${propName(c)}`,sub:tenantName(c),when:`En ${left} d`,tone:''});}
+  alerts.sort((a,b)=>a.rank-b.rank||a.date.localeCompare(b.date));
+  $('#alerts').innerHTML=alerts.length?alerts.slice(0,4).map(a=>`<div class="alert-row"><div class="alert-icon ${a.tone}">${a.title.startsWith('Ajuste')?'↻':a.title.startsWith('Vence')?'⌁':'◷'}</div><div class="alert-text"><b>${esc(a.title)}</b><small>${esc(a.sub)}</small></div><span class="alert-time ${a.tone}">${esc(a.when)}</span></div>`).join(''):empty('Sin alertas inmediatas','Los próximos eventos aparecerán aquí.');
+  const upcoming=activeContracts().map(c=>({c,date:nextAdjustment(c)})).filter(x=>x.date&&daysBetween(today,x.date)<=90).sort((a,b)=>a.date.localeCompare(b.date));
+  $('#upcoming').innerHTML=upcoming.length?`<div class="table-wrap">${table(['Propiedad','Inquilino','Fecha prevista','Frecuencia','Canon actual','Estado'],upcoming.map(({c,date})=>{const diff=daysBetween(today,date);return `<tr><td class="strong">${esc(propName(c))}</td><td>${esc(tenantName(c))}</td><td>${dateLabel(date)}</td><td>Cada ${c.frequency} meses</td><td class="strong">${money(c.rent)}</td><td>${badge(diff<0?'Vencido':diff<=30?'Próximo':'Programado',diff<0?'red':diff<=30?'amber':'green')}</td></tr>`;}))}</div>`:empty('No hay ajustes en los próximos 90 días','Las fechas se calculan según cada contrato.');
+  $('#seedButton').hidden=!isAdmin()||data.properties.length>0;
+}
+function renderPortfolio(){
+  document.querySelectorAll('#portfolioTabs .tab').forEach(b=>b.classList.toggle('active',b.dataset.portfolio===portfolioTab));
+  const names={propiedades:'Nueva propiedad',inquilinos:'Nuevo inquilino',contratos:'Nuevo contrato',garantias:'Nuevo contrato'};$('#portfolioAdd').textContent='＋ '+names[portfolioTab];
+  const filter=$('#portfolioFilter');const old=filter.value;filter.innerHTML=portfolioTab==='propiedades'||portfolioTab==='contratos'?'<option value="todos">Todos los estados</option><option value="vigente">Vigente / ocupada</option><option value="vencido">Vencido / disponible</option>':'<option value="todos">Todos los registros</option>';filter.value=[...filter.options].some(o=>o.value===old)?old:'todos';
+  const q=$('#portfolioSearch').value.trim().toLocaleLowerCase('es-AR'),f=filter.value;
+  let html='';
+  if(portfolioTab==='propiedades'){
+    const items=data.properties.filter(p=>{const occupied=activeContracts().some(c=>c.propertyId===p.id);return (f==='todos'||(f==='vigente')===occupied)&&[p.address,p.city,p.type].join(' ').toLocaleLowerCase('es-AR').includes(q);});
+    html=items.length?table(['Propiedad','Tipo','Ambientes','Cochera','Estado',''],items.map(p=>{const c=activeContracts().find(c=>c.propertyId===p.id);return `<tr><td><div class="strong">${esc(p.address)}</div><div class="tiny">${esc(p.city)}</div></td><td>${esc(p.type)}</td><td>${esc(p.bedrooms)} dormitorio${Number(p.bedrooms)===1?'':'s'}</td><td>${p.parking?'Sí':'No'}</td><td>${badge(c?'Ocupada':'Disponible',c?'green':'neutral')}</td><td><button class="row-button" data-edit="property" data-id="${esc(p.id)}">Editar</button></td></tr>`;})):empty('No hay propiedades para ese filtro','Probá otra búsqueda o agregá una propiedad.');
+  }else if(portfolioTab==='inquilinos'){
+    const items=data.tenants.filter(t=>[t.name,t.email,t.phone].join(' ').toLocaleLowerCase('es-AR').includes(q));
+    html=items.length?table(['Inquilino','Contacto','Propiedad vinculada',''],items.map(t=>{const c=activeContracts().find(c=>c.tenantId===t.id);return `<tr><td class="strong">${esc(t.name)}</td><td>${esc(t.email||t.phone||'Sin datos cargados')}</td><td>${esc(c?propName(c):'Sin contrato vigente')}</td><td><button class="row-button" data-edit="tenant" data-id="${esc(t.id)}">Editar</button></td></tr>`;})):empty('No hay inquilinos para ese filtro','Probá otra búsqueda o agregá un inquilino.');
+  }else if(portfolioTab==='contratos'){
+    const items=data.contracts.filter(c=>{const a=c.end>=today;return(f==='todos'||(f==='vigente')===a)&&[propName(c),tenantName(c),c.guarantee].join(' ').toLocaleLowerCase('es-AR').includes(q);});
+    html=items.length?table(['Propiedad / inquilino','Vigencia','Canon','Ajuste','Estado',''],items.map(c=>`<tr><td><div class="strong">${esc(propName(c))}</div><div class="tiny">${esc(tenantName(c))}</div></td><td>${dateLabel(c.start)} – ${dateLabel(c.end)}</td><td class="strong">${money(c.rent)}</td><td>Cada ${c.frequency} meses<div class="tiny">Próx. ${dateLabel(nextAdjustment(c))}</div></td><td>${badge(c.end>=today?'Vigente':'Finalizado',c.end>=today?'green':'neutral')}</td><td><button class="row-button" data-edit="contract" data-id="${esc(c.id)}">Editar</button></td></tr>`)):empty('No hay contratos para ese filtro','Agregá un contrato vinculado a una propiedad y un inquilino.');
+  }else{
+    const items=data.contracts.filter(c=>[propName(c),tenantName(c),c.guarantee,c.guaranteeDetail].join(' ').toLocaleLowerCase('es-AR').includes(q));
+    html=items.length?table(['Propiedad / inquilino','Depósito registrado','Garantía','Detalle',''],items.map(c=>`<tr><td><div class="strong">${esc(propName(c))}</div><div class="tiny">${esc(tenantName(c))}</div></td><td class="strong">${money(c.deposit)}</td><td>${esc(c.guarantee||'Sin registrar')}</td><td>${esc(c.guaranteeDetail||'—')}</td><td><button class="row-button" data-edit="contract" data-id="${esc(c.id)}">Editar</button></td></tr>`)):empty('No hay depósitos ni garantías','Se cargan desde la ficha del contrato.');
+  }
+  $('#portfolioContent').innerHTML=html;
+}
+function syncPaymentPeriods(){const select=$('#paymentPeriod'),selected=select.value||'todos',periods=[...new Set(data.payments.map(p=>p.period))].sort((a,b)=>b.localeCompare(a));select.innerHTML='<option value="todos">Todos los períodos</option>'+periods.map(period=>`<option value="${esc(period)}">${esc(fmtPeriod(period))}</option>`).join('');select.value=periods.includes(selected)?selected:'todos';}
+function syncPaymentProperties(){const select=$('#paymentProperty'),selected=select.value||'todos',properties=[...data.properties].sort((a,b)=>a.address.localeCompare(b.address,'es'));select.innerHTML='<option value="todos">Todas las unidades</option>'+properties.map(p=>`<option value="${esc(p.id)}">${esc(p.address)}</option>`).join('');select.value=properties.some(p=>p.id===selected)?selected:'todos';}
+function filteredPayments(){const q=$('#paymentSearch').value.trim().toLocaleLowerCase('es-AR'),f=$('#paymentFilter').value,k=$('#paymentType').value,period=$('#paymentPeriod').value,propertyId=$('#paymentProperty').value;return data.payments.filter(p=>{const c=contract(p.contractId),s=paymentStatus(p,today);return(f==='todos'||f===s)&&(k==='todos'||k===p.kind)&&(period==='todos'||period===p.period)&&(propertyId==='todos'||c?.propertyId===propertyId)&&[propName(c),tenantName(c),p.period,p.kind].join(' ').toLocaleLowerCase('es-AR').includes(q);}).sort((a,b)=>b.dueDate.localeCompare(a.dueDate));}
+function renderUnitDebtSummary(items){const el=$('#unitDebtSummary'),propertyId=$('#paymentProperty').value;if(propertyId==='todos'){el.hidden=true;el.innerHTML='';return;}const property=prop(propertyId),period=$('#paymentPeriod').value,considered=period==='todos'?items.filter(p=>p.period<=monthOf(today)):items,total=considered.reduce((sum,p)=>sum+Number(p.amount||0),0),paid=considered.reduce((sum,p)=>sum+collectedAmount(p),0),rentDebt=considered.filter(p=>p.kind==='Alquiler').reduce((sum,p)=>sum+pendingAmount(p),0),expenseDebt=considered.filter(p=>p.kind==='Expensas').reduce((sum,p)=>sum+pendingAmount(p),0),debt=rentDebt+expenseDebt;el.hidden=false;el.className='unit-debt-summary';el.innerHTML=`<div class="unit-debt-title"><span class="overline">DEUDA CONSOLIDADA</span><strong>${esc(property?.address||'Unidad seleccionada')}</strong><small>${period==='todos'?'Todos los períodos hasta el mes actual':fmtPeriod(period)}</small></div><div class="debt-stat primary"><span>Total pendiente</span><strong>${money(debt)}</strong></div><div class="debt-stat"><span>Alquiler</span><strong>${money(rentDebt)}</strong></div><div class="debt-stat"><span>Expensas</span><strong>${money(expenseDebt)}</strong></div><div class="debt-stat"><span>Cobrado / generado</span><strong>${money(paid)} / ${money(total)}</strong></div>`;}
+function renderMoney(){
+  document.querySelectorAll('#moneyTabs .tab').forEach(b=>b.classList.toggle('active',b.dataset.money===moneyTab));$('#paymentsArea').hidden=moneyTab!=='pagos';$('#adjustmentsArea').hidden=moneyTab!=='ajustes';$('#moneyAdd').hidden=moneyTab!=='pagos';$('#exportPaymentsBtn').hidden=moneyTab!=='pagos';
+  syncPaymentProperties();syncPaymentPeriods();
+  const items=filteredPayments();
+  renderUnitDebtSummary(items);
+  $('#paymentsContent').innerHTML=items.length?table(['Propiedad / inquilino','Concepto / período','Vence','Monto','Cobrado / pendiente','Estado','Cargado por',''],items.map(p=>{const [label,tone]=statusMeta(p),balance=pendingAmount(p);return `<tr><td><div class="strong">${esc(propName(contract(p.contractId)))}</div><div class="tiny">${esc(tenantName(contract(p.contractId)))}</div></td><td><div class="strong">${esc(p.kind)}</div><div class="tiny">${fmtPeriod(p.period)}</div></td><td>${dateLabel(p.dueDate)}</td><td class="strong">${money(p.amount)}</td><td><div class="money-stack"><span class="paid-value">${money(collectedAmount(p))}</span><span class="pending-value">Pendiente ${money(balance)}</span></div></td><td>${badge(label,tone)}${p.paidDate?`<div class="tiny">Último pago ${dateLabel(p.paidDate)}</div>`:''}</td><td><div class="strong">${esc(profileName(p.createdBy))}</div>${p.receipts?.length?`<div class="tiny">Pago: ${esc(profileName(p.receipts[0].createdBy))}</div>`:''}</td><td><div class="row-actions">${balance>0?`<button class="row-button" data-collect="${esc(p.id)}">Registrar pago</button>`:''}<button class="row-button" data-edit="payment" data-id="${esc(p.id)}">Editar</button></div></td></tr>`;})):empty('No hay pagos para ese filtro','Registrá un cargo de alquiler o expensas.');
+  const select=$('#calcContract'), selected=select.value;const active=activeContracts();select.innerHTML=active.map(c=>`<option value="${esc(c.id)}">${esc(propName(c))} · ${esc(tenantName(c))}</option>`).join('');if(active.some(c=>c.id===selected))select.value=selected;
+  renderCalc();
+  const history=[...data.adjustments].sort((a,b)=>b.date.localeCompare(a.date));
+  $('#adjustmentHistory').innerHTML=history.length?`<div class="table-wrap">${table(['Fecha','Propiedad','Variación','Canon anterior','Canon nuevo'],history.map(a=>`<tr><td>${dateLabel(a.date)}</td><td class="strong">${esc(propName(contract(a.contractId)))}</td><td>${esc(a.rate)}%</td><td>${money(a.before)}</td><td class="strong">${money(a.after)}</td></tr>`))}</div>`:empty('Todavía no hay ajustes aplicados','La simulación no crea un registro hasta que selecciones “Aplicar ajuste”.');
+}
+function renderCalc(){const c=contract($('#calcContract').value),rate=$('#calcRate').value,el=$('#calcResult');if(!c){el.innerHTML=empty('No hay contratos vigentes','Cargá uno desde la sección Cartera.');$('#applyAdjustment').disabled=true;return;}const date=nextAdjustment(c),estimate=rate!==''?adjustedRent(c.rent,rate):null;$('#applyAdjustment').disabled=estimate===null;el.innerHTML=`<span class="overline">CANON SIMULADO</span><div class="big-money">${estimate===null?'—':money(estimate)}</div><div class="delta">${estimate===null?'Ingresá un porcentaje para calcular':`+ ${money(estimate-c.rent)} · ${esc(rate)}%`}</div><div class="calc-facts"><div><span>Canon actual</span><b>${money(c.rent)}</b></div><div><span>Próxima fecha prevista</span><b>${dateLabel(date)}</b></div><div><span>Periodicidad</span><b>Cada ${c.frequency} meses</b></div><div><span>Fecha siguiente al aplicar</span><b>${date?dateLabel(addMonths(date,Number(c.frequency))):'—'}</b></div></div>`;}
+
+function renderTeam(){
+  if(!isAdmin())return;
+  const byEmail=new Map(data.invites.map(invite=>[invite.email,{email:invite.email,role:invite.role,active:invite.active,joined:false}]));
+  for(const person of data.profiles){const current=byEmail.get(person.email)||{email:person.email};byEmail.set(person.email,{...current,role:person.role,active:person.active,joined:true,name:person.full_name,userId:person.user_id});}
+  const rows=[...byEmail.values()].sort((a,b)=>String(a.email).localeCompare(String(b.email),'es'));
+  $('#teamContent').innerHTML=rows.length?table(['Persona','Rol','Estado',''],rows.map(person=>`<tr><td><div class="strong">${esc(person.name||person.email)}</div><div class="tiny">${esc(person.email)}</div></td><td>${badge(person.role==='admin'?'Administrador':'Operativo',person.role==='admin'?'green':'neutral')}</td><td>${badge(person.active?(person.joined?'Activo':'Invitado'):'Deshabilitado',person.active?'green':'red')}</td><td><button class="row-button" data-access-email="${esc(person.email)}" data-access-role="${esc(person.role)}" data-access-active="${person.active?'false':'true'}">${person.active?'Deshabilitar':'Habilitar'}</button></td></tr>`)):empty('Todavía no hay accesos','Habilitá el primer correo desde el formulario.');
+}
+
+function renderActivity(){
+  if(!isAdmin())return;
+  const labels={properties:'Propiedad',tenants:'Inquilino',contracts:'Contrato',charges:'Cargo',receipts:'Pago',adjustments:'Ajuste',access_invites:'Acceso',pagos_csv:'CSV de pagos'};
+  const actions={INSERT:'Creó',UPDATE:'Modificó',DELETE:'Eliminó',EXPORT:'Exportó'};
+  $('#activityContent').innerHTML=data.audit.length?table(['Fecha y hora','Usuario','Acción','Registro'],data.audit.map(item=>`<tr><td>${new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Argentina/Mendoza'}).format(new Date(item.occurred_at))}</td><td><div class="strong">${esc(profileName(item.actor_id))}</div></td><td>${badge(actions[item.action]||item.action,item.action==='DELETE'?'red':item.action==='EXPORT'?'amber':'green')}</td><td><div class="strong">${esc(labels[item.table_name]||item.table_name)}</div><div class="tiny">${esc(item.record_id||'Registro general')}</div></td></tr>`)):empty('Sin actividad registrada','Los cambios y exportaciones aparecerán aquí.');
+}
+
+const schema={
+  property:{title:'Propiedad',collection:'properties',fields:[['address','Identificador / dirección','text',true,'wide'],['city','Localidad','text',true],['type','Tipo','select',true,['Departamento','Casa','Local','Oficina','Otro']],['bedrooms','Dormitorios','number',true],['parking','Cochera','select',true,['Sí','No']]]},
+  tenant:{title:'Inquilino',collection:'tenants',fields:[['name','Nombre','text',true,'wide'],['email','Correo electrónico','email',false],['phone','Teléfono','tel',false]]},
+  contract:{title:'Contrato',collection:'contracts',fields:[['propertyId','Propiedad','property',true,'wide'],['tenantId','Inquilino','tenant',true,'wide'],['start','Inicio','date',true],['end','Finalización','date',true],['rent','Canon mensual (ARS)','number',true],['frequency','Frecuencia de ajuste (meses)','number',true],['lastAdjustmentDate','Último ajuste aplicado (opcional)','date',false],['dueDay','Día de vencimiento mensual','number',true],['deposit','Depósito registrado (ARS)','number',false],['guarantee','Tipo de garantía','select',false,['','Garantía propietaria','Seguro de caución','Recibo de sueldo','Otra']],['guaranteeDetail','Detalle de garantía','text',false,'wide']]},
+  payment:{title:'Pago o cargo',collection:'payments',fields:[['contractId','Contrato','contract',true,'wide'],['kind','Concepto','select',true,['Alquiler','Expensas']],['period','Período','month',true],['amount','Monto total (ARS)','number',true],['dueDate','Fecha de vencimiento','date',true],['paidAmount','Monto cobrado acumulado (ARS)','number',false],['paidDate','Fecha del último pago','date',false]]}
+};
+function optionsFor(type){let arr=type==='property'?data.properties:type==='tenant'?data.tenants:data.contracts;return arr.map(x=>`<option value="${esc(x.id)}">${esc(type==='property'?x.address:type==='tenant'?x.name:propName(x)+' · '+tenantName(x))}</option>`).join('');}
+function showForm(type,id=null,opts={}){const s=schema[type];if(!s)return;if(type==='contract'&&(!data.properties.length||!data.tenants.length)){toast('Cargá una propiedad y un inquilino antes del contrato.');return;}if(type==='payment'&&!data.contracts.length){toast('Cargá un contrato antes de registrar pagos.');return;}
+  editing={type,id,collect:!!opts.collect};const source=id?data[s.collection].find(x=>x.id===id):{};if(id&&!source)return;const record={...source};
+  if(type==='payment'){if(record.paidAmount===undefined)record.paidAmount=record.paidDate?Number(record.amount)||0:0;if(opts.collect){record.paidAmount=Number(record.amount)||0;record.paidDate=today;}if(opts.presetKind)record.kind=opts.presetKind;if(opts.presetPeriod)record.period=opts.presetPeriod;}
+  $('#dialogKicker').textContent=opts.collect?'COBRANZA':id?'EDITAR REGISTRO':'NUEVO REGISTRO';$('#dialogTitle').textContent=opts.collect?'Registrar pago':(id?'Editar ':'Nuevo ')+s.title.toLowerCase();$('#deleteRecord').hidden=!id||!!opts.collect||!isAdmin();
+  $('#formFields').innerHTML=s.fields.map(([key,label,kind,required,wide])=>{let value=record[key]??({period:homeMonth,dueDate:today,paidAmount:0,paidDate:'',frequency:3,dueDay:10,deposit:0,parking:false}[key]??'');if(key==='parking')value=value?'Sí':'No';let control;
+    if(['property','tenant','contract','select'].includes(kind)){const opts=kind==='select'?wide.map(x=>`<option value="${esc(x)}">${esc(x||'Sin especificar')}</option>`).join(''):optionsFor(kind);control=`<select name="${key}" ${required?'required':''}>${!required&&kind!=='select'?'<option value="">Seleccionar…</option>':''}${opts}</select>`;}
+    else control=`<input name="${key}" type="${kind}" value="${esc(value)}" ${required?'required':''} ${kind==='number'?'min="0" step="'+(key==='frequency'||key==='dueDay'||key==='bedrooms'?'1':'0.01')+'"':''} ${key==='frequency'?'max="60"':''} ${key==='dueDay'?'max="31" min="1"':''} />`;
+    return `<div class="field ${wide==='wide'?'wide':''}"><label for="field-${key}">${esc(label)}</label>${control.replace(/(name="[^"]+")/,`$1 id="field-${key}"`)}</div>`;
+  }).join('')+(type==='contract'?'<p class="form-note wide">El depósito es un importe registrado, no un cálculo de devolución. El porcentaje de actualización se ingresa al aplicar cada ajuste.</p>':type==='payment'?'<p class="form-note wide">Para un pago parcial, indicá el total cobrado acumulado. Cada incremento genera un comprobante inalterable asociado a tu usuario.</p>':'');
+  for(const [key,label,kind] of s.fields){if(kind==='select'||['property','tenant','contract'].includes(kind)){const el=$(`[name="${key}"]`);if(record[key]!==undefined)el.value=key==='parking'?(record[key]?'Sí':'No'):String(record[key]);}}
+  $('#formDialog').showModal();
+}
+async function submitForm(e){e.preventDefault();if(!editing||busy)return;const {type,id}=editing,s=schema[type],form=new FormData(e.currentTarget),obj={};for(const [key,,kind] of s.fields){let value=form.get(key)??'';obj[key]=kind==='number'?Number(value||0):key==='parking'?value==='Sí':String(value).trim();}
+  if(type==='contract'&&obj.end<obj.start){toast('La fecha de fin debe ser posterior al inicio.');return;}if(type==='contract'&&(!Number.isInteger(obj.frequency)||obj.frequency<1||obj.frequency>60)){toast('Ingresá una frecuencia de 1 a 60 meses.');return;}if(type==='contract'&&obj.lastAdjustmentDate&&obj.lastAdjustmentDate<obj.start){toast('El último ajuste no puede ser anterior al inicio.');return;}if(type==='contract'&&obj.lastAdjustmentDate&&obj.lastAdjustmentDate>today){toast('El último ajuste no puede estar en el futuro.');return;}if(type==='contract'&&obj.lastAdjustmentDate&&obj.lastAdjustmentDate>obj.end){toast('El último ajuste no puede ser posterior al fin del contrato.');return;}if(type==='payment'&&obj.paidAmount>obj.amount){toast('El monto cobrado no puede superar el monto total.');return;}if(type==='payment'&&obj.paidDate&&obj.paidDate>today){toast('La fecha cobrada no puede estar en el futuro.');return;}if(type==='payment'){if(obj.paidAmount>0&&!obj.paidDate)obj.paidDate=today;if(obj.paidAmount===0)obj.paidDate='';}if(type==='payment'&&data.payments.some(p=>p.id!==id&&p.contractId===obj.contractId&&p.kind===obj.kind&&p.period===obj.period)){toast('Ya existe ese concepto para este contrato y período. Editá el registro existente.');return;}
+  if(type==='contract'&&data.contracts.some(c=>c.id!==id&&c.propertyId===obj.propertyId&&c.start<=obj.end&&obj.start<=c.end)){toast('Ya existe un contrato que se superpone para esta propiedad.');return;}
+  const previous=type==='payment'&&id?data.payments.find(item=>item.id===id):null;
+  const previousPaid=previous?collectedAmount(previous):0;
+  if(type==='payment'&&obj.paidAmount<previousPaid){toast('Los pagos registrados no se reducen ni se borran. Cargá un ajuste administrativo por separado.');return;}
+  busy=true;e.currentTarget.querySelector('[type="submit"]').disabled=true;
+  try{
+    const saved=await saveEntity(type,id,obj);
+    if(type==='payment'&&obj.paidAmount>previousPaid){await addReceipt(id||saved?.id,obj.paidAmount-previousPaid,obj.paidDate||today);}
+    $('#formDialog').close();editing=null;await reloadData();toast('Registro guardado y atribuido a tu usuario.');
+  }catch(error){toast(cloudMessage(error));}
+  finally{busy=false;e.currentTarget.querySelector('[type="submit"]').disabled=false;}
+}
+async function deleteEditing(){if(!editing?.id||busy)return;const {type,id}=editing;if(type==='property'&&data.contracts.some(c=>c.propertyId===id)||type==='tenant'&&data.contracts.some(c=>c.tenantId===id)||type==='contract'&&(data.payments.some(p=>p.contractId===id)||data.adjustments.some(a=>a.contractId===id))){toast('Tiene registros vinculados. Conservá el historial o eliminá primero las relaciones.');return;}if(!confirm('¿Eliminar este registro? Esta acción quedará registrada.'))return;busy=true;try{await deleteEntity(type,id);$('#formDialog').close();editing=null;await reloadData();toast('Registro eliminado y asentado en la actividad.');}catch(error){toast(cloudMessage(error));}finally{busy=false;}}
+async function applyAdjustment(){const c=contract($('#calcContract').value),rate=Number($('#calcRate').value),date=c&&nextAdjustment(c);if(!c||$('#calcRate').value===''||!Number.isFinite(rate)||rate<0||rate>1000||!date||busy)return;const after=adjustedRent(c.rent,rate);if(!confirm(`Aplicar ${rate}% al canon de ${propName(c)} con fecha ${dateLabel(date)}?\n${money(c.rent)} → ${money(after)}`))return;busy=true;try{await saveAdjustment(c.id,date,rate,Number(c.rent),after);$('#calcRate').value='';await reloadData();toast('Ajuste aplicado y registrado.');}catch(error){toast(cloudMessage(error));}finally{busy=false;}}
+async function exportBackup(){const blob=new Blob([JSON.stringify({...data,profile:undefined,profiles:undefined,invites:undefined,audit:undefined},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`ambito-respaldo-${today}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);try{await logCsvExport({format:'json',scope:'cartera_completa'});}catch{}toast('Respaldo descargado.');}
+function csvDate(value){if(!value)return '';const [year,month,day]=value.split('-');return `${day}/${month}/${year}`;}
+async function exportPaymentsCsv(){
+  const records=filteredPayments();if(!records.length){toast('No hay pagos para exportar con los filtros actuales.');return;}
+  const columns=[
+    {label:'ID registro',get:p=>p.id},{label:'ID contrato',get:p=>p.contractId},
+    {label:'Propiedad',get:p=>propName(contract(p.contractId))},{label:'Localidad',get:p=>prop(contract(p.contractId)?.propertyId)?.city||''},{label:'Tipo de propiedad',get:p=>prop(contract(p.contractId)?.propertyId)?.type||''},
+    {label:'Inquilino',get:p=>tenantName(contract(p.contractId))},{label:'Email',get:p=>tenant(contract(p.contractId)?.tenantId)?.email||''},{label:'Teléfono',get:p=>tenant(contract(p.contractId)?.tenantId)?.phone||''},
+    {label:'Inicio del contrato',get:p=>csvDate(contract(p.contractId)?.start)},{label:'Fin del contrato',get:p=>csvDate(contract(p.contractId)?.end)},{label:'Día de vencimiento contractual',get:p=>contract(p.contractId)?.dueDay||'',type:'number'},
+    {label:'Concepto',get:p=>p.kind},{label:'Período',get:p=>p.period},{label:'Fecha de vencimiento',get:p=>csvDate(p.dueDate)},
+    {label:'Monto total',get:p=>Number(p.amount)||0,type:'number'},{label:'Monto cobrado',get:p=>collectedAmount(p),type:'number'},{label:'Saldo pendiente',get:p=>pendingAmount(p),type:'number'},
+    {label:'Estado',get:p=>statusMeta(p)[0]},{label:'Fecha del último pago',get:p=>csvDate(p.paidDate)},
+    {label:'Cargo creado por',get:p=>profileName(p.createdBy)},{label:'Cantidad de pagos',get:p=>p.receipts?.length||0,type:'number'},
+    {label:'Pagos registrados',get:p=>(p.receipts||[]).map(r=>`${csvDate(r.paidDate)} | ${Number(r.amount).toFixed(2)} | ${profileName(r.createdBy)}`).join(' ; ')}
+  ];
+  const blob=new Blob([buildCsv(columns,records)],{type:'text/csv;charset=utf-8;'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`pagos-expensas-${today}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);toast(`CSV generado con ${records.length} registro${records.length===1?'':'s'}.`);
+  try{await logCsvExport({format:'csv',rows:records.length,property:$('#paymentProperty').value,period:$('#paymentPeriod').value,status:$('#paymentFilter').value,concept:$('#paymentType').value});}catch{}
+}
+
+function cloudMessage(error){
+  const raw=String(error?.message||'No se pudo completar la operación.');
+  if(/invalid login credentials/i.test(raw))return 'Correo o contraseña incorrectos.';
+  if(/email not confirmed/i.test(raw))return 'Revisá tu correo y confirmá la cuenta antes de ingresar.';
+  if(/user already registered/i.test(raw))return 'Ese correo ya tiene una cuenta. Ingresá con tu contraseña.';
+  if(error?.status===403)return 'No tenés permiso para realizar esta acción.';
+  if(error?.status===409)return 'Ya existe un registro con esos datos.';
+  return raw;
+}
+
+function setAuthMode(mode){
+  authMode=mode;
+  document.querySelectorAll('[data-auth-mode]').forEach(button=>button.classList.toggle('active',button.dataset.authMode===mode));
+  $('#fullNameField').hidden=mode!=='signup';
+  $('#fullNameField input').required=mode==='signup';
+  $('#authForm [name="password"]').autocomplete=mode==='signup'?'new-password':'current-password';
+  $('#authSubmit').textContent=mode==='signup'?'Crear acceso':'Ingresar';
+  $('#authMessage').textContent='';
+}
+
+function showAuth(message=''){$('#authGate').hidden=false;$('#loadingGate').hidden=true;$('#appShell').hidden=true;$('#authMessage').textContent=message;}
+function showLoading(){$('#authGate').hidden=true;$('#loadingGate').hidden=false;$('#appShell').hidden=true;}
+
+function updateUserUI(){
+  const person=data.profile;
+  const label=person?.full_name||person?.email||'Usuario';
+  $('#userName').textContent=label;
+  $('#userRole').textContent=person?.role==='admin'?'Administrador':'Operativo';
+  $('#userAvatar').textContent=label.split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]).join('').toUpperCase()||'U';
+  document.querySelectorAll('.admin-only').forEach(element=>element.hidden=!isAdmin());
+  if(!isAdmin()&&(view==='equipo'||view==='actividad'))view='inicio';
+}
+
+async function reloadData(){
+  data=await loadPortal();
+  const created=await ensureRentCharges(data.contracts,data.payments,monthOf(today));
+  if(created)data=await loadPortal();
+  updateUserUI();render();
+}
+
+async function enterPortal(){
+  showLoading();
+  try{await reloadData();$('#loadingGate').hidden=true;$('#appShell').hidden=false;showView(view);}
+  catch(error){await signOut().catch(()=>{});showAuth(cloudMessage(error));}
+}
+
+async function bootstrap(){
+  setAuthMode('login');
+  const session=await restoreSession();
+  if(!session){showAuth();return;}
+  await enterPortal();
+}
+
+document.addEventListener('click',async e=>{const authTab=e.target.closest('[data-auth-mode]');if(authTab){setAuthMode(authTab.dataset.authMode);return;}const nav=e.target.closest('[data-view]');if(nav){showView(nav.dataset.view);return;}const go=e.target.closest('[data-goto]');if(go){if(go.dataset.tab)moneyTab=go.dataset.tab;showView(go.dataset.goto);return;}const act=e.target.closest('[data-action]');if(act?.dataset.action==='new-payment'){showForm('payment',null,{presetPeriod:homeMonth});return;}if(act?.dataset.action==='new-expense'){showForm('payment',null,{presetKind:'Expensas',presetPeriod:homeMonth});return;}const collect=e.target.closest('[data-collect]');if(collect){showForm('payment',collect.dataset.collect,{collect:true});return;}const edit=e.target.closest('[data-edit]');if(edit){showForm(edit.dataset.edit,edit.dataset.id);return;}const access=e.target.closest('[data-access-email]');if(access&&!busy){busy=true;access.disabled=true;try{await setAccessInvite(access.dataset.accessEmail,access.dataset.accessRole,access.dataset.accessActive==='true');await reloadData();toast('Acceso actualizado.');}catch(error){toast(cloudMessage(error));}finally{busy=false;access.disabled=false;}}});
+document.querySelectorAll('#portfolioTabs .tab').forEach(b=>b.addEventListener('click',()=>{portfolioTab=b.dataset.portfolio;$('#portfolioSearch').value='';renderPortfolio();}));
+document.querySelectorAll('#moneyTabs .tab').forEach(b=>b.addEventListener('click',()=>{moneyTab=b.dataset.money;renderMoney();}));
+$('#portfolioSearch').addEventListener('input',renderPortfolio);$('#portfolioFilter').addEventListener('change',renderPortfolio);$('#paymentSearch').addEventListener('input',renderMoney);$('#paymentProperty').addEventListener('change',renderMoney);$('#paymentPeriod').addEventListener('change',renderMoney);$('#paymentFilter').addEventListener('change',renderMoney);$('#paymentType').addEventListener('change',renderMoney);$('#homeMonth').addEventListener('change',e=>{homeMonth=e.target.value||monthOf(today);renderHome();});$('#homeStatus').addEventListener('change',renderHome);$('#calcContract').addEventListener('change',renderCalc);$('#calcRate').addEventListener('input',renderCalc);
+$('#portfolioAdd').addEventListener('click',()=>showForm(({propiedades:'property',inquilinos:'tenant',contratos:'contract',garantias:'contract'})[portfolioTab]));$('#moneyAdd').addEventListener('click',()=>showForm('payment',null,{presetPeriod:homeMonth}));$('#applyAdjustment').addEventListener('click',applyAdjustment);
+$('#editorForm').addEventListener('submit',submitForm);$('#closeDialog').addEventListener('click',()=>$('#formDialog').close());$('#cancelDialog').addEventListener('click',()=>$('#formDialog').close());$('#deleteRecord').addEventListener('click',deleteEditing);$('#exportBtn').addEventListener('click',exportBackup);$('#exportPaymentsBtn').addEventListener('click',exportPaymentsCsv);$('#menuBtn').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));
+$('#authForm').addEventListener('submit',async event=>{event.preventDefault();if(busy)return;busy=true;const form=new FormData(event.currentTarget),email=String(form.get('email')||''),password=String(form.get('password')||''),fullName=String(form.get('fullName')||'');$('#authSubmit').disabled=true;$('#authMessage').textContent='';try{if(authMode==='signup'){const result=await signUp(email,password,fullName);if(!result?.access_token){setAuthMode('login');$('#authMessage').textContent='Cuenta creada. Revisá tu correo para confirmarla y después ingresá.';return;}}else await signIn(email,password);await enterPortal();}catch(error){$('#authMessage').textContent=cloudMessage(error);}finally{busy=false;$('#authSubmit').disabled=false;}});
+$('#signOutBtn').addEventListener('click',async()=>{if(busy)return;busy=true;try{await signOut();$('#authForm').reset();showAuth('Sesión cerrada.');}finally{busy=false;}});
+$('#inviteForm').addEventListener('submit',async event=>{event.preventDefault();if(busy)return;busy=true;const form=new FormData(event.currentTarget),button=event.currentTarget.querySelector('button');button.disabled=true;try{await setAccessInvite(String(form.get('email')||''),String(form.get('role')||'operativo'),true);event.currentTarget.reset();await reloadData();toast('Correo habilitado. La persona ya puede crear su acceso.');}catch(error){toast(cloudMessage(error));}finally{busy=false;button.disabled=false;}});
+$('#refreshActivity').addEventListener('click',async()=>{try{await reloadData();toast('Actividad actualizada.');}catch(error){toast(cloudMessage(error));}});
+$('#seedButton').addEventListener('click',async()=>{if(busy||data.properties.length)return;if(!confirm('¿Cargar propiedades, personas, contratos y pagos ficticios para probar el portal?'))return;busy=true;$('#seedButton').disabled=true;try{await seedFictitiousData();await reloadData();toast('Ejemplo ficticio cargado.');}catch(error){toast(cloudMessage(error));}finally{busy=false;$('#seedButton').disabled=false;}});
+$('#clockDate').textContent=new Intl.DateTimeFormat('es-AR',{timeZone:'America/Argentina/Mendoza',day:'numeric',month:'long',year:'numeric'}).format(new Date());
+bootstrap();

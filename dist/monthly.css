@@ -1,0 +1,25 @@
+.heading-actions{display:flex;gap:10px;align-items:center}
+.monthly-panel{margin-bottom:20px;overflow:hidden}
+.monthly-head{padding:22px 26px 18px;border-bottom:1px solid var(--line)}
+.month-controls{display:flex;gap:10px;align-items:center}
+.month-controls label{font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:800;color:#87999a}
+.month-controls input,.month-controls select{border:1px solid #dce7e2;border-radius:7px;background:#fff;color:#3c5a5e;padding:9px 11px;font-size:12px}
+.monthly-panel .data-table th,.monthly-panel .data-table td{padding-top:14px;padding-bottom:14px}
+.money-stack{display:grid;gap:3px}
+.money-stack .pending-value{font-weight:800;color:#a66723}
+.money-stack .paid-value{font-size:10px;color:#258067}
+.lower-grid{margin-top:20px}
+.status.blue{background:#e9f3f8;color:#35728f}
+.summary-note{padding:13px 26px;border-top:1px solid var(--line);background:#fbfcfb;color:#72878a;font-size:11px}
+.quick-pay{white-space:nowrap}
+.unit-debt-summary{margin:0 26px 20px;border:1px solid #dcebe3;border-radius:11px;background:#f4faf6;padding:19px 21px;display:grid;grid-template-columns:minmax(210px,1.4fr) repeat(4,minmax(110px,1fr));gap:16px;align-items:center}
+.unit-debt-title .overline{display:block;margin-bottom:7px}
+.unit-debt-title strong{display:block;font:800 16px 'Manrope';color:#1b3d42}
+.unit-debt-title small{display:block;color:#71898a;margin-top:4px}
+.debt-stat{border-left:1px solid #d4e5da;padding-left:16px}
+.debt-stat span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#7d9291;font-weight:800;margin-bottom:6px}
+.debt-stat strong{font:800 17px 'Manrope';color:#24464a}
+.debt-stat.primary strong{font-size:21px;color:#a35b32}
+@media(max-width:750px){.heading-actions{width:100%;flex-wrap:wrap}.heading-actions button{flex:1}.monthly-head{align-items:flex-start;flex-direction:column}.month-controls{width:100%;flex-wrap:wrap}.month-controls input,.month-controls select{flex:1}.monthly-panel .data-table{min-width:860px}}
+@media(max-width:980px){.unit-debt-summary{grid-template-columns:1fr 1fr}.unit-debt-title{grid-column:1/-1}.debt-stat{border-left:0;border-top:1px solid #d4e5da;padding:12px 0 0}}
+@media(max-width:750px){.unit-debt-summary{margin:0 15px 16px}}
